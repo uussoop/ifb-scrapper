@@ -14,7 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/antchfx/htmlquery"
 	"github.com/gin-gonic/gin"
+	ptime "github.com/yaa110/go-persian-calendar"
+	"golang.org/x/net/html"
+	"gorm.io/gorm"
 )
 
 var token = ""
@@ -107,9 +111,18 @@ func main() {
 	r.Use(AuthMiddleware())
 	r.GET("/table", getTable)
 	r.GET("/table/filter", getFilteredTable)
+	r.GET("/bond", getBondDetail)
 	r.Run(":8080")
 }
-
+func getBondDetail(c *gin.Context) {
+	symbolidStr := c.Query("id")
+	detailURL := fmt.Sprintf("https://www.ifb.ir/Instrumentsmfi.aspx?id=%s", symbolidStr)
+	bond, err := getBondDetails(&http.Client{}, detailURL)
+	if err != nil {
+		c.AbortWithError(500, err)
+	}
+	c.JSON(200, bond)
+}
 func getTable(c *gin.Context) {
 	c.JSON(200, appCache.GetTable())
 }
@@ -402,4 +415,126 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+type Bond struct {
+	gorm.Model
+	SymbolId            string
+	Symbol              string
+	SubClass            string
+	LastTradingDate     time.Time
+	PublicationDate     time.Time
+	MaturityDate        time.Time
+	LastPrice           float64
+	FaceValue           float64
+	NominalInterestRate float64
+	Volume              float64
+	YTM                 float64
+	CalculatedYTM       float64
+}
+
+func getBondDetails(client *http.Client, bondURL string) (Bond, error) {
+	var bond Bond
+	parsedURL, err := url.Parse(bondURL)
+	if err != nil {
+		fmt.Println("Error parsing URL:", err)
+	}
+
+	// Get the query parameters
+	queryParams := parsedURL.Query()
+
+	// Extract the 'id' parameter
+	bond.SymbolId = queryParams.Get("id")
+	println(bondURL)
+	resp, err := client.Get(bondURL)
+	if err != nil {
+		return bond, err
+	}
+	defer resp.Body.Close()
+
+	doc, err := htmlquery.Parse(resp.Body)
+	if err != nil {
+		return bond, err
+	}
+
+	bond.Symbol = safeGetText(doc, "/html/body/div/div[3]/div[1]/div[1]/div[1]/form/div[2]/div/div[3]/div[1]/div[1]/table/tbody/tr[2]/td[2]")
+	bond.SubClass = safeGetText(doc, "/html/body/div/div[3]/div[1]/div[1]/div[1]/form/div[2]/div/div[3]/div[1]/div[1]/table/tbody/tr[2]/td[2]")
+	fmt.Println(bond.Symbol)
+	fmt.Println(bond.SubClass)
+
+	lastPrice := safeGetText(doc, "/html/body/div/div[3]/div[1]/div[1]/div[1]/form/div[1]/div[2]/div[1]/span[2]")
+	bond.LastPrice, _ = removeCommasAndConvertToFloat(persianToEnglishNumber(lastPrice))
+	fmt.Println(lastPrice)
+
+	maturityDateStr := safeGetText(doc, "/html/body/div/div[3]/div[1]/div[1]/div[1]/form/div[2]/div/div[3]/div[2]/div[2]/div[2]/table/tbody/tr[5]/td[2]")
+	bond.MaturityDate, _ = parseDate(maturityDateStr)
+	fmt.Println(maturityDateStr)
+
+	faceValue := safeGetText(doc, "/html/body/div/div[3]/div[1]/div[1]/div[1]/form/div[2]/div/div[3]/div[2]/div[2]/div[1]/table/tbody/tr[2]/td[2]")
+	bond.FaceValue, _ = removeCommasAndConvertToFloat(persianToEnglishNumber(faceValue))
+	fmt.Println(faceValue)
+	publicationDateStr := safeGetText(doc, "/html/body/div/div[3]/div[1]/div[1]/div[1]/form/div[2]/div/div[3]/div[2]/div[2]/div[1]/table/tbody/tr[5]/td[2]")
+	bond.PublicationDate, _ = parseDate(publicationDateStr)
+	fmt.Println(publicationDateStr)
+
+	nominalInterestRate := safeGetText(doc, "/html/body/div/div[3]/div[1]/div[1]/div[1]/form/div[2]/div/div[3]/div[2]/div[2]/div[2]/table/tbody/tr[2]/td[2]")
+	bond.NominalInterestRate, _ = removeCommasAndConvertToFloat(persianToEnglishNumber(nominalInterestRate))
+	fmt.Println(nominalInterestRate)
+	return bond, nil
+}
+
+func removeCommasAndConvertToFloat(numberStr string) (float64, error) {
+	cleanStr := strings.ReplaceAll(numberStr, ",", "")
+	return strconv.ParseFloat(cleanStr, 64)
+}
+
+func parseDate(dateStr string) (time.Time, error) {
+	// Assuming the date format is "YYYY/MM/DD"
+	parts := strings.Split(dateStr, "/")
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid date format: %s", dateStr)
+	}
+	year, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid year: %s", parts[0])
+	}
+	month, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid month: %s", parts[1])
+	}
+	day, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid day: %s", parts[2])
+	}
+
+	// Convert Jalali to Gregorian
+	persianDate := ptime.Date(year, ptime.Month(month), day, 0, 0, 0, 0, time.UTC)
+	gregorianDate := persianDate.Time()
+
+	return gregorianDate, nil
+}
+
+func safeGetText(doc *html.Node, xpath string) string {
+	nodes, err := htmlquery.QueryAll(doc, xpath)
+	if err != nil {
+		fmt.Printf("Error querying XPath '%s': %v\n", xpath, err)
+		return ""
+	}
+	if len(nodes) == 0 {
+		fmt.Printf("No nodes found for XPath '%s'\n", xpath)
+		return ""
+	}
+	return strings.TrimSpace(htmlquery.InnerText(nodes[0]))
+}
+
+var persianNumbers = map[string]string{
+	"۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4",
+	"۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9",
+}
+
+func persianToEnglishNumber(persianStr string) string {
+	for persian, english := range persianNumbers {
+		persianStr = strings.ReplaceAll(persianStr, persian, english)
+	}
+	return persianStr
 }
