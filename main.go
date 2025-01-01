@@ -482,7 +482,7 @@ func getBondDetails(client *http.Client, bondURL string) (Bond, error) {
 	bond.NominalInterestRate, _ = removeCommasAndConvertToFloat(persianToEnglishNumber(nominalInterestRate))
 	fmt.Println(nominalInterestRate)
 
-	intervalStr := safeGetText(doc, "/html/body/div/div[3]/div[1]/div[1]/div[1]/form/div[2]/div/div[3]/div[2]/div[2]/div[2]/table/tbody/tr[6]/td[2]")
+	intervalStr := safeGetText(doc, "/html/body/div/div[3]/div[1]/div[1]/div[1]/form/div[4]/div/div[3]/div[2]/div[2]/div[2]/table/tbody/tr[7]/td[2]")
 	intervalStr = strings.TrimSpace(strings.ReplaceAll(intervalStr, "ماه", ""))
 	bond.Interval, _ = strconv.Atoi(persianToEnglishNumber(intervalStr))
 	fmt.Println(intervalStr)
