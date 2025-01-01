@@ -20,6 +20,7 @@ The application uses SignalR for real-time data streaming:
 - Implements automatic reconnection with exponential backoff
 - Handles different message types: `updateSingleTable` and `updateRow`
 
+
 ### 2.2 Data Caching
 Thread-safe caching mechanism:
 - Uses `AppCache` struct with RWMutex for concurrent access
