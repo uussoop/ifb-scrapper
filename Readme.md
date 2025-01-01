@@ -9,6 +9,7 @@ The IFB Scraper is a Go application designed to:
 
 ## 2. Core Components
 
+
 ### 2.1 Data Streaming
 The application uses SignalR for real-time data streaming:
 - Establishes connection through a multi-step process:
